@@ -1,9 +1,6 @@
 use anyhow::Result;
-use javy_runner::{Runner, RunnerError, UseExportedFn};
-use std::path::{Path, PathBuf};
+use javy_runner::{Plugin, Runner, RunnerError, UseExportedFn};
 use std::str;
-
-static ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
 fn test_dylib() -> Result<()> {
@@ -41,7 +38,7 @@ fn test_dylib_with_error() -> Result<()> {
     let expected_log_output = "Error:1:24 foo error\n    at foo (function.mjs:1:24)\n    at <anonymous> (function.mjs:1:50)\n\n";
     assert_eq!(
         expected_log_output,
-        String::from_utf8(e.downcast_ref::<RunnerError>().unwrap().stderr.clone())?
+        e.downcast_ref::<RunnerError>().unwrap().stderr
     );
 
     Ok(())
@@ -60,15 +57,5 @@ fn test_dylib_with_exported_func() -> Result<()> {
 }
 
 fn plugin_module() -> Result<Vec<u8>> {
-    let mut lib_path = PathBuf::from(ROOT);
-    lib_path.pop();
-    lib_path.pop();
-    lib_path = lib_path.join(
-        Path::new("target")
-            .join("wasm32-wasip1")
-            .join("release")
-            .join("plugin_wizened.wasm"),
-    );
-
-    std::fs::read(lib_path).map_err(Into::into)
+    std::fs::read(Plugin::Default.path()).map_err(Into::into)
 }

@@ -56,14 +56,33 @@ fn test_errors_in_exported_functions_are_correctly_reported(builder: &mut Builde
     Ok(())
 }
 
-#[javy_cli_test(dyn = true, root = "tests/dynamic-linking-scripts")]
+#[javy_cli_test(
+    dyn = true,
+    root = "tests/dynamic-linking-scripts",
+    commands(not(Compile))
+)]
 // If you need to change this test, then you've likely made a breaking change.
 pub fn check_for_new_imports(builder: &mut Builder) -> Result<()> {
     let runner = builder.input("console.js").build()?;
     runner.assert_known_base_imports()
 }
 
-#[javy_cli_test(dyn = true, root = "tests/dynamic-linking-scripts")]
+#[javy_cli_test(
+    dyn = true,
+    root = "tests/dynamic-linking-scripts",
+    commands(not(Build))
+)]
+// If you need to change this test, then you've likely made a breaking change.
+pub fn check_for_new_imports_for_compile(builder: &mut Builder) -> Result<()> {
+    let runner = builder.input("console.js").build()?;
+    runner.assert_known_base_imports_for_compile()
+}
+
+#[javy_cli_test(
+    dyn = true,
+    root = "tests/dynamic-linking-scripts",
+    commands(not(Build))
+)]
 // If you need to change this test, then you've likely made a breaking change.
 pub fn check_for_new_imports_for_exports(builder: &mut Builder) -> Result<()> {
     let runner = builder
@@ -72,7 +91,7 @@ pub fn check_for_new_imports_for_exports(builder: &mut Builder) -> Result<()> {
         .world("foo-test")
         .build()?;
 
-    runner.assert_known_named_function_imports()
+    runner.assert_known_named_function_imports_for_compile()
 }
 
 #[javy_cli_test(dyn = true, root = "tests/dynamic-linking-scripts")]
@@ -105,9 +124,9 @@ fn test_using_runtime_flag_with_dynamic_triggers_error(builder: &mut Builder) ->
         .input("console.js")
         .redirect_stdout_to_stderr(false)
         .build();
-    assert!(build_result.is_err_and(|e| e
-        .to_string()
-        .contains("Error: Cannot set JS runtime options when building a dynamic module")));
+    assert!(build_result.is_err_and(|e| e.to_string().contains(
+        "error: Property redirect-stdout-to-stderr is not supported for runtime configuration"
+    )));
     Ok(())
 }
 
@@ -131,12 +150,16 @@ fn javy_json_identity(builder: &mut Builder) -> Result<()> {
 }
 
 #[javy_cli_test(dyn = true, commands(not(Compile)))]
-fn test_using_plugin_with_dynamic_build_fails(builder: &mut Builder) -> Result<()> {
-    let result = builder.plugin(Plugin::User).input("plugin.js").build();
-    let err = result.err().unwrap();
-    assert!(err
-        .to_string()
-        .contains("Cannot use plugins for building dynamic modules"));
+fn test_using_plugin_with_dynamic_works(builder: &mut Builder) -> Result<()> {
+    let plugin = Plugin::User;
+    let mut runner = builder
+        .plugin(Plugin::User)
+        .preload(plugin.namespace().into(), plugin.path())
+        .input("plugin.js")
+        .build()?;
+
+    let result = runner.exec(&[]);
+    assert!(result.is_ok());
 
     Ok(())
 }

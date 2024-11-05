@@ -23,6 +23,8 @@ pub enum Plugin {
     V2,
     Default,
     User,
+    /// Pass the default plugin on the CLI as a user plugin.
+    DefaultAsUser,
 }
 
 impl Plugin {
@@ -31,8 +33,29 @@ impl Plugin {
             Self::V2 => "javy_quickjs_provider_v2",
             // Could try and derive this but not going to for now since tests
             // will break if it changes.
-            Self::Default => "javy_quickjs_provider_v3",
+            Self::Default | Self::DefaultAsUser => "javy_quickjs_provider_v3",
             Self::User { .. } => "test_plugin",
+        }
+    }
+
+    pub fn path(&self) -> PathBuf {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        match self {
+            Self::V2 => root
+                .join("..")
+                .join("..")
+                .join("crates")
+                .join("cli")
+                .join("src")
+                .join("javy_quickjs_provider_v2.wasm"),
+            Self::User => root.join("test_plugin.wasm"),
+            Self::Default | Self::DefaultAsUser => root
+                .join("..")
+                .join("..")
+                .join("target")
+                .join("wasm32-wasip1")
+                .join("release")
+                .join("plugin_wizened.wasm"),
         }
     }
 }
@@ -224,7 +247,7 @@ pub struct Runner {
 #[derive(Debug)]
 pub struct RunnerError {
     pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
+    pub stderr: String,
     pub err: anyhow::Error,
 }
 
@@ -235,7 +258,7 @@ impl Display for RunnerError {
         write!(
             f,
             "error: {:?}, stdout: {:?}, stderr: {:?}",
-            self.err, self.stdout, self.stderr
+            self.err, self.stdout, self.stderr,
         )
     }
 }
@@ -407,7 +430,7 @@ impl Runner {
         })
     }
 
-    pub fn assert_known_base_imports(&self) -> Result<()> {
+    pub fn assert_known_base_imports_for_compile(&self) -> Result<()> {
         let module = Module::from_binary(self.linker.engine(), &self.wasm)?;
         let instance_name = self.plugin.namespace();
 
@@ -445,7 +468,45 @@ impl Runner {
         }
     }
 
-    pub fn assert_known_named_function_imports(&self) -> Result<()> {
+    pub fn assert_known_base_imports(&self) -> Result<()> {
+        let module = Module::from_binary(self.linker.engine(), &self.wasm)?;
+        let instance_name = self.plugin.namespace();
+
+        let result = module.imports().filter(|i| {
+            if i.module() == instance_name && i.name() == "canonical_abi_realloc" {
+                let ty = i.ty();
+                let f = ty.unwrap_func();
+                return f.params().all(|p| p.is_i32())
+                    && f.params().len() == 4
+                    && f.results().len() == 1
+                    && f.results().all(|r| r.is_i32());
+            }
+
+            if i.module() == instance_name && i.name() == "invoke" {
+                let ty = i.ty();
+                let f = ty.unwrap_func();
+                return f.params().all(|p| p.is_i32())
+                    && f.params().len() == 4
+                    && f.results().len() == 0;
+            }
+
+            if i.module() == instance_name && i.name() == "memory" {
+                let ty = i.ty();
+                return ty.memory().is_some();
+            }
+
+            false
+        });
+
+        let count = result.count();
+        if count == 3 {
+            Ok(())
+        } else {
+            Err(anyhow!("Unexpected number of imports: {}", count))
+        }
+    }
+
+    pub fn assert_known_named_function_imports_for_compile(&self) -> Result<()> {
         self.assert_known_base_imports()?;
 
         let module = Module::from_binary(self.linker.engine(), &self.wasm)?;
@@ -587,9 +648,9 @@ impl Runner {
             args.push(format!("text-encoding={}", if enabled { "y" } else { "n" }));
         }
 
-        if let Plugin::User = plugin {
+        if matches!(plugin, Plugin::User | Plugin::DefaultAsUser) {
             args.push("-C".to_string());
-            args.push(format!("plugin={}", Self::plugin_path().to_str().unwrap()));
+            args.push(format!("plugin={}", plugin.path().to_str().unwrap()));
         }
 
         args
@@ -809,15 +870,11 @@ impl Runner {
             Ok(_) => Ok((output, logs, fuel_consumed)),
             Err(err) => Err(RunnerError {
                 stdout: output,
-                stderr: logs,
+                stderr: String::from_utf8(logs).unwrap(),
                 err,
             }
             .into()),
         }
-    }
-
-    fn plugin_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_plugin.wasm")
     }
 }
 
